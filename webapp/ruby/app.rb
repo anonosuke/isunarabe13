@@ -103,20 +103,38 @@ module Isupipe
       end
 
       def fill_livestream_response(tx, livestream_model)
+        # オーナーユーザを取得
         owner_model = tx.xquery('SELECT * FROM users WHERE id = ?', livestream_model.fetch(:user_id)).first
         owner = fill_user_response(tx, owner_model)
-
-        tags = tx.xquery('SELECT * FROM livestream_tags WHERE livestream_id = ?', livestream_model.fetch(:id)).map do |livestream_tag_model|
-          tag_model = tx.xquery('SELECT * FROM tags WHERE id = ?', livestream_tag_model.fetch(:tag_id)).first
+      
+        # 対象のライブストリームに紐づくライブストリームタグを一括取得
+        livestream_tag_models = tx.xquery('SELECT * FROM livestream_tags WHERE livestream_id = ?', livestream_model.fetch(:id))
+      
+        # 全タグIDをまとめて取得
+        tag_ids = livestream_tag_models.map { |ltm| ltm.fetch(:tag_id) }
+      
+        # タグIDのリストが空でなければ、IN句で一度にタグを取得し、ハッシュ化
+        tags_map = {}
+        unless tag_ids.empty?
+          placeholders = tag_ids.map { '?' }.join(',')
+          tags_map = tx.xquery("SELECT * FROM tags WHERE id IN (#{placeholders})", *tag_ids).each_with_object({}) do |t, h|
+            h[t.fetch(:id)] = t
+          end
+        end
+      
+        # 事前に取得したtags_mapからタグ情報を紐づける
+        tags = livestream_tag_models.map do |livestream_tag_model|
+          tag_model = tags_map[livestream_tag_model.fetch(:tag_id)]
           {
             id: tag_model.fetch(:id),
             name: tag_model.fetch(:name),
           }
         end
-
+      
+        # レスポンス組み立て
         livestream_model.slice(:id, :title, :description, :playlist_url, :thumbnail_url, :start_at, :end_at).merge(
-          owner:,
-          tags:,
+          owner: owner,
+          tags: tags,
         )
       end
 
